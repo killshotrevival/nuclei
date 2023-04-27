@@ -1,14 +1,20 @@
 package output
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	b64 "encoding/base64"
 
 	"github.com/pkg/errors"
 
@@ -50,6 +56,8 @@ type StandardWriter struct {
 	timestamp        bool
 	noMetadata       bool
 	matcherStatus    bool
+	astraMeta        astraMeta
+	astraWebhook     string
 	mutex            *sync.Mutex
 	aurora           aurora.Aurora
 	outputFile       io.WriteCloser
@@ -180,6 +188,46 @@ func NewStandardWriter(options *types.Options) (*StandardWriter, error) {
 			gologger.Fatal().Msgf("Could not create output directory '%s': %s\n", options.StoreResponseDir, err)
 		}
 	}
+
+	// Load required scan data from environment variable
+	tempAstraMeta := astraMeta{}
+	tempAstraWebhookUrl := ""
+
+	value, ok := os.LookupEnv("auditId")
+	if ok {
+		tempAstraMeta.AuditId = value
+	} else {
+		panic("Audit Id env not present")
+	}
+
+	value, ok = os.LookupEnv("jobId")
+	if ok {
+		tempAstraMeta.JobId = value
+	} else {
+		panic("Job Id env not present")
+	}
+
+	value, ok = os.LookupEnv("scanId")
+	if ok {
+		tempAstraMeta.ScanId = value
+	} else {
+		panic("Scan Id env not present")
+	}
+
+	value, ok = os.LookupEnv("webhookToken")
+	if ok {
+		tempAstraMeta.WebhookToken = value
+	} else {
+		panic("Webhook token env not present")
+	}
+
+	value, ok = os.LookupEnv("webhookUrl")
+	if ok {
+		tempAstraWebhookUrl = value
+	} else {
+		panic("Webhook token env not present")
+	}
+
 	writer := &StandardWriter{
 		json:             options.JSONL,
 		jsonReqResp:      options.JSONRequests,
@@ -194,8 +242,52 @@ func NewStandardWriter(options *types.Options) (*StandardWriter, error) {
 		severityColors:   colorizer.New(auroraColorizer),
 		storeResponse:    options.StoreResponse,
 		storeResponseDir: options.StoreResponseDir,
+		astraMeta:        tempAstraMeta,
+		astraWebhook:     tempAstraWebhookUrl,
 	}
 	return writer, nil
+}
+
+type astraMeta struct {
+	Event        string `json:"event"`
+	AuditId      string `json:"auditId"`
+	JobId        string `json:"jobId"`
+	ScanId       string `json:"scanId"`
+	WebhookToken string `json:"webhookToken"`
+}
+
+// Request struct that will be used for astra alert's.
+type astraAlertRequest struct {
+	Meta    astraMeta       `json:"meta"`
+	Context json.RawMessage `json:"context"`
+}
+
+// This function will extract headers and other required data from HTTP raw response string
+func extractResponseData(rawResponse string) (string, int, map[string]string) {
+	headers := make(map[string]string)
+	headerPattern := regexp.MustCompile(`(?m)^([\w-]+):\s*([^\n\r]*)[\n\r]+`)
+
+	// Find all matches of header fields in the raw response string
+	matches := headerPattern.FindAllStringSubmatch(rawResponse, -1)
+
+	// Loop through the matches and extract the header name and value
+	for _, match := range matches {
+		name := strings.ToLower(match[1])
+		value := match[2]
+		headers[name] = value
+	}
+
+	// Extract the status code and HTTP version from the raw response string
+	statusPattern := regexp.MustCompile(`^HTTP/(\d+\.\d+)\s+(\d+)\s+.*`)
+	statusMatch := statusPattern.FindStringSubmatch(rawResponse)
+	httpVersion := ""
+	statusCode := 0
+	if len(statusMatch) > 2 {
+		httpVersion = statusMatch[1]
+		statusCode, _ = strconv.Atoi(statusMatch[2])
+	}
+
+	return httpVersion, statusCode, headers
 }
 
 // Write writes the event to file and/or screen.
@@ -208,6 +300,17 @@ func (w *StandardWriter) Write(event *ResultEvent) error {
 
 	var data []byte
 	var err error
+
+	// Extract required data from response string and update response string
+	httpVersion, statusCode, headers := extractResponseData(event.Response)
+	newResponseString := fmt.Sprintf("HTTP version: %s\nStatus code: %d\n", httpVersion, statusCode)
+	for name, value := range headers {
+		newResponseString = newResponseString + fmt.Sprintf("%s: %s\n", name, value)
+	}
+	event.Response = newResponseString
+
+	event.Request = b64.StdEncoding.EncodeToString([]byte(event.Request))
+	event.Response = b64.StdEncoding.EncodeToString([]byte(event.Response))
 
 	if w.json {
 		data, err = w.formatJSON(event)
@@ -223,8 +326,23 @@ func (w *StandardWriter) Write(event *ResultEvent) error {
 	w.mutex.Lock()
 	defer w.mutex.Unlock()
 
-	_, _ = os.Stdout.Write(data)
-	_, _ = os.Stdout.Write([]byte("\n"))
+	// _, _ = os.Stdout.Write(data)
+	// _, _ = os.Stdout.Write([]byte("\n"))
+
+	fmt.Printf("Raising alert for -> %s\n", event.TemplateURL)
+
+	tempRequest := astraAlertRequest{}
+
+	tempMeta := w.astraMeta
+	tempRequest.Meta = tempMeta
+	tempRequest.Context = data
+
+	postBody, _ := json.Marshal(tempRequest)
+	responseBody := bytes.NewBuffer(postBody)
+
+	resp, err := http.Post(w.astraWebhook, "application/json", responseBody)
+
+	fmt.Printf("Request status received -> %s for alert\n", resp.Status)
 
 	if w.outputFile != nil {
 		if !w.json {
