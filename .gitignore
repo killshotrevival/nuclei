@@ -16,3 +16,5 @@ v2/pkg/protocols/common/helpers/deserialization/testdata/ValueObject.class
 v2/pkg/protocols/common/helpers/deserialization/testdata/ValueObject2.ser
 *.exe
 
+# Directory holding specific templates to test
+nuclei_templates

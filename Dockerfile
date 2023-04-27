@@ -1,14 +1,14 @@
 # Build
-FROM golang:1.20.2-alpine AS build-env
+FROM --platform=linux/amd64 golang:1.20.2-alpine AS build-env
 RUN apk add build-base
 WORKDIR /app
 COPY . /app
 WORKDIR /app/v2
 RUN go mod download
-RUN go build ./cmd/nuclei
+RUN CGO_ENABLED=0 go build ./cmd/nuclei
 
 # Release
-FROM alpine:3.17.2
+FROM --platform=linux/amd64 alpine:3.17.2
 RUN apk -U upgrade --no-cache \
     && apk add --no-cache bind-tools chromium ca-certificates
 COPY --from=build-env /app/v2/nuclei /usr/local/bin/
