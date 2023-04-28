@@ -254,6 +254,10 @@ func NewStandardWriter(options *types.Options) (*StandardWriter, error) {
 	return writer, nil
 }
 
+type sendStatusChangeRequestStruct struct {
+	StateChange json.RawMessage `json:"state_change"`
+}
+
 // Function for updating status of scan in database
 func (w *StandardWriter) sendStatusChangeRequest(action string) {
 	gologger.Info().Msgf("Sending status change request with action -> %s\n", action)
@@ -269,7 +273,10 @@ func (w *StandardWriter) sendStatusChangeRequest(action string) {
 		tempRequest = map[string]string{"status": action}
 	}
 
-	postBody, _ := json.Marshal(tempRequest)
+	tempRequestBody, _ := json.Marshal(tempRequest)
+	temp_ := sendStatusChangeRequestStruct{tempRequestBody}
+
+	postBody, _ := json.Marshal(temp_)
 	responseBody := bytes.NewBuffer(postBody)
 	req, _ := http.NewRequest("PATCH", fmt.Sprintf("http://%s/api/nuclei/%s", value, w.astraMeta.ScanId), responseBody)
 
