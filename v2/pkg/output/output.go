@@ -247,7 +247,55 @@ func NewStandardWriter(options *types.Options) (*StandardWriter, error) {
 		astraMeta:        tempAstraMeta,
 		astraWebhook:     tempAstraWebhookUrl,
 	}
+
+	// Changing state to running
+	gologger.Info().Msg("Changing scan state to running")
+	writer.sendStatusChangeRequest("RUNNING")
 	return writer, nil
+}
+
+// Function for updating status of scan in database
+func (w *StandardWriter) sendStatusChangeRequest(action string) {
+	gologger.Info().Msgf("Sending status change request with action -> %s\n", action)
+	var tempRequest map[string]string
+
+	value, ok := os.LookupEnv("DAST_API_SVC_NAME")
+	if !ok {
+		panic("Webhook token env not present")
+	}
+	if action == "RUNNING" {
+		tempRequest = map[string]string{"status": action, "pid": "15"}
+	} else {
+		tempRequest = map[string]string{"status": action}
+	}
+
+	postBody, _ := json.Marshal(tempRequest)
+	responseBody := bytes.NewBuffer(postBody)
+	resp, _ := http.Post(fmt.Sprintf("http://%s/api/nuclei/%s", value, w.astraMeta.ScanId), "application/json", responseBody)
+
+	gologger.Info().Msgf("Status code received for `status change api` -> %s\n", resp.Status)
+
+	if action != "COMPLETE" {
+		return
+	}
+
+	// Trigger `scan.complete` event on webhook
+	gologger.Info().Msg("Triggering completing event on webhook url")
+
+	w.astraMeta.Event = "scan.complete"
+	tempAstraRequest := astraAlertRequest{}
+
+	tempMeta := w.astraMeta
+	tempAstraRequest.Meta = tempMeta
+	tempAstraRequest.Context = []byte(`{"reason":"Scan Completed successfully"}`)
+
+	postBody_, _ := json.Marshal(tempAstraRequest)
+	responseBody_ := bytes.NewBuffer(postBody_)
+
+	resp_, _ := http.Post(w.astraWebhook, "application/json", responseBody_)
+
+	gologger.Info().Msgf("Request status received -> %s for alert\n", resp_.Status)
+
 }
 
 type astraMeta struct {
@@ -331,7 +379,7 @@ func (w *StandardWriter) Write(event *ResultEvent) error {
 	// _, _ = os.Stdout.Write(data)
 	// _, _ = os.Stdout.Write([]byte("\n"))
 
-	fmt.Printf("Raising alert for -> %s\n", event.TemplateURL)
+	gologger.Info().Msgf("Raising alert for -> %s\n", event.TemplateURL)
 
 	tempRequest := astraAlertRequest{}
 
@@ -344,7 +392,7 @@ func (w *StandardWriter) Write(event *ResultEvent) error {
 
 	resp, err := http.Post(w.astraWebhook, "application/json", responseBody)
 
-	fmt.Printf("Request status received -> %s for alert\n", resp.Status)
+	gologger.Info().Msgf("Request status received -> %s for alert\n", resp.Status)
 
 	if w.outputFile != nil {
 		if !w.json {
@@ -402,6 +450,10 @@ func (w *StandardWriter) Colorizer() aurora.Aurora {
 
 // Close closes the output writing interface
 func (w *StandardWriter) Close() {
+	gologger.Info().Msg("Execution completed successfully, triggering complete event")
+
+	w.sendStatusChangeRequest("COMPLETE")
+
 	if w.outputFile != nil {
 		w.outputFile.Close()
 	}
