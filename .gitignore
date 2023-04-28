@@ -18,3 +18,5 @@ v2/pkg/protocols/common/helpers/deserialization/testdata/ValueObject2.ser
 
 # Directory holding specific templates to test
 nuclei_templates
+
+alert_request

@@ -193,6 +193,8 @@ func NewStandardWriter(options *types.Options) (*StandardWriter, error) {
 	tempAstraMeta := astraMeta{}
 	tempAstraWebhookUrl := ""
 
+	tempAstraMeta.Event = "alert"
+
 	value, ok := os.LookupEnv("auditId")
 	if ok {
 		tempAstraMeta.AuditId = value
