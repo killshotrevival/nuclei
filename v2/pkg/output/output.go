@@ -286,19 +286,18 @@ func (w *StandardWriter) sendStatusChangeRequest(action string) {
 
 	gologger.Info().Msgf("Status code received for `status change api` -> %s\n", resp.Status)
 
-	if action != "COMPLETE" {
-		return
-	}
-
 	// Trigger `scan.complete` event on webhook
-	gologger.Info().Msg("Triggering completing event on webhook url")
+	gologger.Info().Msg("Triggering event on webhook url")
 
-	w.astraMeta.Event = "scan.complete"
 	tempAstraRequest := astraAlertRequest{}
-
-	tempMeta := w.astraMeta
-	tempAstraRequest.Meta = tempMeta
-	tempAstraRequest.Context = []byte(`{"reason":"Scan Completed successfully"}`)
+	if action == "RUNNING" {
+		w.astraMeta.Event = "scan.started"
+		tempAstraRequest.Context = []byte(`{"reason":"Scan Started successfully"}`)
+	} else {
+		w.astraMeta.Event = "scan.complete"
+		tempAstraRequest.Context = []byte(`{"reason":"Scan Completed successfully"}`)
+	}
+	tempAstraRequest.Meta = w.astraMeta
 
 	postBody_, _ := json.Marshal(tempAstraRequest)
 	responseBody_ := bytes.NewBuffer(postBody_)
@@ -393,6 +392,8 @@ func (w *StandardWriter) Write(event *ResultEvent) error {
 	gologger.Info().Msgf("Raising alert for -> %s\n", event.TemplateURL)
 
 	tempRequest := astraAlertRequest{}
+
+	w.astraMeta.Event = "alert"
 
 	tempMeta := w.astraMeta
 	tempRequest.Meta = tempMeta
