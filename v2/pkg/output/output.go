@@ -271,7 +271,11 @@ func (w *StandardWriter) sendStatusChangeRequest(action string) {
 
 	postBody, _ := json.Marshal(tempRequest)
 	responseBody := bytes.NewBuffer(postBody)
-	resp, _ := http.Post(fmt.Sprintf("http://%s/api/nuclei/%s", value, w.astraMeta.ScanId), "application/json", responseBody)
+	req, _ := http.NewRequest("PATCH", fmt.Sprintf("http://%s/api/nuclei/%s", value, w.astraMeta.ScanId), responseBody)
+
+	req.Header.Set("Content-Type", "application/json")
+	client := &http.Client{}
+	resp, _ := client.Do(req)
 
 	gologger.Info().Msgf("Status code received for `status change api` -> %s\n", resp.Status)
 
