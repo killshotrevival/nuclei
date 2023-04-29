@@ -1,6 +1,7 @@
 package progress
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/projectdiscovery/clistats"
 	"github.com/projectdiscovery/gologger"
+	"github.com/projectdiscovery/nuclei/v2/pkg/output"
 )
 
 // Progress is an interface implemented by nuclei progress display
@@ -208,10 +210,72 @@ func (p *StatsTicker) makePrintCallback() func(stats clistats.StatisticsClient) 
 }
 
 func printCallbackJSON(stats clistats.StatisticsClient) {
-	builder := &strings.Builder{}
-	if err := json.NewEncoder(builder).Encode(metricsMap(stats)); err == nil {
-		fmt.Fprintf(os.Stderr, "%s", builder.String())
+	tempMetricsString := metricsMap(stats)
+	tempMetricsString["reason"] = "Liveness update from scan"
+	callWebhookWithHealthEvent(tempMetricsString)
+
+	// builder := &strings.Builder{}
+	// if err := json.NewEncoder(builder).Encode(tempMetricsString); err == nil {
+	// 	// fmt.Fprintf(os.Stderr, "%s", builder.String())
+	// }
+}
+
+// This function is used for sending health check events on webhook url
+func callWebhookWithHealthEvent(tempMetricsString map[string]interface{}) {
+	tempAstraWebhookUrl := ""
+	tempAstraRequest := output.AstraAlertRequest{}
+
+	tempAstraRequest.Meta = output.AstraMeta{}
+	tempAstraRequest.Meta.Event = "scan.health"
+	tempAstraRequest.Context = []byte(`{"reason":"Scan Started successfully"}`)
+
+	value, ok := os.LookupEnv("auditId")
+	if ok {
+		tempAstraRequest.Meta.AuditId = value
+	} else {
+		panic("Audit Id env not present")
 	}
+
+	value, ok = os.LookupEnv("jobId")
+	if ok {
+		tempAstraRequest.Meta.JobId = value
+	} else {
+		panic("Job Id env not present")
+	}
+
+	value, ok = os.LookupEnv("scanId")
+	if ok {
+		tempAstraRequest.Meta.ScanId = value
+	} else {
+		panic("Scan Id env not present")
+	}
+
+	value, ok = os.LookupEnv("webhookToken")
+	if ok {
+		tempAstraRequest.Meta.WebhookToken = value
+	} else {
+		panic("Webhook token env not present")
+	}
+
+	value, ok = os.LookupEnv("webhookUrl")
+	if ok {
+		tempAstraWebhookUrl = value
+	} else {
+		panic("Webhook url env not present")
+	}
+
+	res, err := json.Marshal(tempMetricsString)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Unable to marshal stats -> %s\n", err)
+		return
+	}
+	tempAstraRequest.Context = res
+
+	postBody_, _ := json.Marshal(tempAstraRequest)
+	responseBody_ := bytes.NewBuffer(postBody_)
+	resp_, _ := http.Post(tempAstraWebhookUrl, "application/json", responseBody_)
+
+	fmt.Fprintf(os.Stderr, "Response received for health check -> %s\n", resp_.Status)
 }
 
 func metricsMap(stats clistats.StatisticsClient) map[string]interface{} {

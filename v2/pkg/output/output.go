@@ -51,21 +51,22 @@ type Writer interface {
 
 // StandardWriter is a writer writing output to file and screen for results.
 type StandardWriter struct {
-	json             bool
-	jsonReqResp      bool
-	timestamp        bool
-	noMetadata       bool
-	matcherStatus    bool
-	astraMeta        astraMeta
-	astraWebhook     string
-	mutex            *sync.Mutex
-	aurora           aurora.Aurora
-	outputFile       io.WriteCloser
-	traceFile        io.WriteCloser
-	errorFile        io.WriteCloser
-	severityColors   func(severity.Severity) string
-	storeResponse    bool
-	storeResponseDir string
+	json                bool
+	jsonReqResp         bool
+	timestamp           bool
+	noMetadata          bool
+	matcherStatus       bool
+	AstraMeta           AstraMeta
+	AstraWebhook        string
+	AstraApiServiceName string
+	mutex               *sync.Mutex
+	aurora              aurora.Aurora
+	outputFile          io.WriteCloser
+	traceFile           io.WriteCloser
+	errorFile           io.WriteCloser
+	severityColors      func(severity.Severity) string
+	storeResponse       bool
+	storeResponseDir    string
 }
 
 var decolorizerRegex = regexp.MustCompile(`\x1B\[[0-9;]*[a-zA-Z]`)
@@ -190,8 +191,8 @@ func NewStandardWriter(options *types.Options) (*StandardWriter, error) {
 	}
 
 	// Load required scan data from environment variable
-	tempAstraMeta := astraMeta{}
-	tempAstraWebhookUrl := ""
+	tempAstraMeta := AstraMeta{}
+	var tempAstraWebhookUrl, tempAstraApiServiceName string
 
 	tempAstraMeta.Event = "alert"
 
@@ -227,25 +228,33 @@ func NewStandardWriter(options *types.Options) (*StandardWriter, error) {
 	if ok {
 		tempAstraWebhookUrl = value
 	} else {
-		panic("Webhook token env not present")
+		panic("Webhook url env not present")
+	}
+
+	value, ok = os.LookupEnv("DAST_API_SVC_NAME")
+	if !ok {
+		panic("Support server env not present")
+	} else {
+		tempAstraApiServiceName = value
 	}
 
 	writer := &StandardWriter{
-		json:             options.JSONL,
-		jsonReqResp:      options.JSONRequests,
-		noMetadata:       options.NoMeta,
-		matcherStatus:    options.MatcherStatus,
-		timestamp:        options.Timestamp,
-		aurora:           auroraColorizer,
-		mutex:            &sync.Mutex{},
-		outputFile:       outputFile,
-		traceFile:        traceOutput,
-		errorFile:        errorOutput,
-		severityColors:   colorizer.New(auroraColorizer),
-		storeResponse:    options.StoreResponse,
-		storeResponseDir: options.StoreResponseDir,
-		astraMeta:        tempAstraMeta,
-		astraWebhook:     tempAstraWebhookUrl,
+		json:                options.JSONL,
+		jsonReqResp:         options.JSONRequests,
+		noMetadata:          options.NoMeta,
+		matcherStatus:       options.MatcherStatus,
+		timestamp:           options.Timestamp,
+		aurora:              auroraColorizer,
+		mutex:               &sync.Mutex{},
+		outputFile:          outputFile,
+		traceFile:           traceOutput,
+		errorFile:           errorOutput,
+		severityColors:      colorizer.New(auroraColorizer),
+		storeResponse:       options.StoreResponse,
+		storeResponseDir:    options.StoreResponseDir,
+		AstraMeta:           tempAstraMeta,
+		AstraWebhook:        tempAstraWebhookUrl,
+		AstraApiServiceName: tempAstraApiServiceName,
 	}
 
 	// Changing state to running
@@ -263,10 +272,6 @@ func (w *StandardWriter) sendStatusChangeRequest(action string) {
 	gologger.Info().Msgf("Sending status change request with action -> %s\n", action)
 	var tempRequest map[string]string
 
-	value, ok := os.LookupEnv("DAST_API_SVC_NAME")
-	if !ok {
-		panic("Webhook token env not present")
-	}
 	if action == "RUNNING" {
 		tempRequest = map[string]string{"status": action, "pid": "15"}
 	} else {
@@ -278,7 +283,7 @@ func (w *StandardWriter) sendStatusChangeRequest(action string) {
 
 	postBody, _ := json.Marshal(temp_)
 	responseBody := bytes.NewBuffer(postBody)
-	req, _ := http.NewRequest("PATCH", fmt.Sprintf("http://%s/api/nuclei/%s", value, w.astraMeta.ScanId), responseBody)
+	req, _ := http.NewRequest("PATCH", fmt.Sprintf("http://%s/api/nuclei/%s", w.AstraApiServiceName, w.AstraMeta.ScanId), responseBody)
 
 	req.Header.Set("Content-Type", "application/json")
 	client := &http.Client{}
@@ -289,26 +294,26 @@ func (w *StandardWriter) sendStatusChangeRequest(action string) {
 	// Trigger `scan.complete` event on webhook
 	gologger.Info().Msg("Triggering event on webhook url")
 
-	tempAstraRequest := astraAlertRequest{}
+	tempAstraRequest := AstraAlertRequest{}
 	if action == "RUNNING" {
-		w.astraMeta.Event = "scan.started"
+		w.AstraMeta.Event = "scan.started"
 		tempAstraRequest.Context = []byte(`{"reason":"Scan Started successfully"}`)
 	} else {
-		w.astraMeta.Event = "scan.complete"
+		w.AstraMeta.Event = "scan.complete"
 		tempAstraRequest.Context = []byte(`{"reason":"Scan Completed successfully"}`)
 	}
-	tempAstraRequest.Meta = w.astraMeta
+	tempAstraRequest.Meta = w.AstraMeta
 
 	postBody_, _ := json.Marshal(tempAstraRequest)
 	responseBody_ := bytes.NewBuffer(postBody_)
 
-	resp_, _ := http.Post(w.astraWebhook, "application/json", responseBody_)
+	resp_, _ := http.Post(w.AstraWebhook, "application/json", responseBody_)
 
 	gologger.Info().Msgf("Request status received -> %s for alert\n", resp_.Status)
 
 }
 
-type astraMeta struct {
+type AstraMeta struct {
 	Event        string `json:"event"`
 	AuditId      string `json:"auditId"`
 	JobId        string `json:"jobId"`
@@ -317,8 +322,8 @@ type astraMeta struct {
 }
 
 // Request struct that will be used for astra alert's.
-type astraAlertRequest struct {
-	Meta    astraMeta       `json:"meta"`
+type AstraAlertRequest struct {
+	Meta    AstraMeta       `json:"meta"`
 	Context json.RawMessage `json:"context"`
 }
 
@@ -391,18 +396,18 @@ func (w *StandardWriter) Write(event *ResultEvent) error {
 
 	gologger.Info().Msgf("Raising alert for -> %s\n", event.TemplateURL)
 
-	tempRequest := astraAlertRequest{}
+	tempRequest := AstraAlertRequest{}
 
-	w.astraMeta.Event = "alert"
+	w.AstraMeta.Event = "alert"
 
-	tempMeta := w.astraMeta
+	tempMeta := w.AstraMeta
 	tempRequest.Meta = tempMeta
 	tempRequest.Context = data
 
 	postBody, _ := json.Marshal(tempRequest)
 	responseBody := bytes.NewBuffer(postBody)
 
-	resp, err := http.Post(w.astraWebhook, "application/json", responseBody)
+	resp, err := http.Post(w.AstraWebhook, "application/json", responseBody)
 
 	gologger.Info().Msgf("Request status received -> %s for alert\n", resp.Status)
 
