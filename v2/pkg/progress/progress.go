@@ -226,6 +226,7 @@ func callWebhookWithHealthEvent(tempMetricsString map[string]interface{}) {
 	tempAstraRequest := output.AstraAlertRequest{}
 
 	tempAstraRequest.Meta = output.AstraMeta{}
+	tempAstraRequest.Meta.Hostname = "k8s"
 	tempAstraRequest.Meta.Event = "scan.health"
 	tempAstraRequest.Context = []byte(`{"reason":"Scan Started successfully"}`)
 

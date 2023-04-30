@@ -195,6 +195,7 @@ func NewStandardWriter(options *types.Options) (*StandardWriter, error) {
 	var tempAstraWebhookUrl, tempAstraApiServiceName string
 
 	tempAstraMeta.Event = "alert"
+	tempAstraMeta.Hostname = "k8s"
 
 	value, ok := os.LookupEnv("auditId")
 	if ok {
@@ -319,6 +320,7 @@ type AstraMeta struct {
 	JobId        string `json:"jobId"`
 	ScanId       string `json:"scanId"`
 	WebhookToken string `json:"webhookToken"`
+	Hostname     string `json:"hostname"`
 }
 
 // Request struct that will be used for astra alert's.
