@@ -288,7 +288,11 @@ func (w *StandardWriter) sendStatusChangeRequest(action string) {
 
 	req.Header.Set("Content-Type", "application/json")
 	client := &http.Client{}
-	resp, _ := client.Do(req)
+	resp, err := client.Do(req)
+
+	if err != nil {
+		panic(err)
+	}
 
 	gologger.Info().Msgf("Status code received for `status change api` -> %s\n", resp.Status)
 
