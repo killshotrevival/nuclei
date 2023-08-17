@@ -11,13 +11,14 @@ import (
 	"github.com/projectdiscovery/nuclei/v2/pkg/testutils"
 )
 
-var workflowTestcases = map[string]testutils.TestCase{
-	"workflow/basic.yaml":                     &workflowBasic{},
-	"workflow/condition-matched.yaml":         &workflowConditionMatched{},
-	"workflow/condition-unmatched.yaml":       &workflowConditionUnmatch{},
-	"workflow/matcher-name.yaml":              &workflowMatcherName{},
-	"workflow/http-value-share-workflow.yaml": &workflowHttpKeyValueShare{},
-	"workflow/dns-value-share-workflow.yaml":  &workflowDnsKeyValueShare{},
+var workflowTestcases = []TestCaseInfo{
+	{Path: "workflow/basic.yaml", TestCase: &workflowBasic{}},
+	{Path: "workflow/condition-matched.yaml", TestCase: &workflowConditionMatched{}},
+	{Path: "workflow/condition-unmatched.yaml", TestCase: &workflowConditionUnmatch{}},
+	{Path: "workflow/matcher-name.yaml", TestCase: &workflowMatcherName{}},
+	{Path: "workflow/http-value-share-workflow.yaml", TestCase: &workflowHttpKeyValueShare{}},
+	{Path: "workflow/dns-value-share-workflow.yaml", TestCase: &workflowDnsKeyValueShare{}},
+	{Path: "workflow/shared-cookie.yaml", TestCase: &workflowSharedCookies{}},
 }
 
 type workflowBasic struct{}
@@ -130,4 +131,40 @@ func (h *workflowDnsKeyValueShare) Execute(filePath string) error {
 
 	// no results - ensure that the variable sharing works
 	return expectResultsCount(results, 1)
+}
+
+type workflowSharedCookies struct{}
+
+// Execute executes a test case and returns an error if occurred
+func (h *workflowSharedCookies) Execute(filePath string) error {
+	handleFunc := func(name string, w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+		cookie := &http.Cookie{Name: name, Value: name}
+		http.SetCookie(w, cookie)
+	}
+
+	var gotCookies []string
+	router := httprouter.New()
+	router.GET("/http1", func(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
+		handleFunc("http1", w, r, p)
+	})
+	router.GET("/http2", func(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
+		handleFunc("http2", w, r, p)
+	})
+	router.GET("/headless1", func(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
+		handleFunc("headless1", w, r, p)
+	})
+	router.GET("/http3", func(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
+		for _, cookie := range r.Cookies() {
+			gotCookies = append(gotCookies, cookie.Name)
+		}
+	})
+	ts := httptest.NewServer(router)
+	defer ts.Close()
+
+	_, err := testutils.RunNucleiWorkflowAndGetResults(filePath, ts.URL, debug, "-headless")
+	if err != nil {
+		return err
+	}
+
+	return expectResultsCount(gotCookies, 3)
 }

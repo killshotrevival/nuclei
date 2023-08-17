@@ -12,10 +12,11 @@ import (
 	"github.com/projectdiscovery/nuclei/v2/pkg/testutils"
 )
 
-var fuzzingTestCases = map[string]testutils.TestCase{
-	"fuzz/fuzz-mode.yaml":  &fuzzModeOverride{},
-	"fuzz/fuzz-type.yaml":  &fuzzTypeOverride{},
-	"fuzz/fuzz-query.yaml": &httpFuzzQuery{},
+var fuzzingTestCases = []TestCaseInfo{
+	{Path: "fuzz/fuzz-mode.yaml", TestCase: &fuzzModeOverride{}},
+	{Path: "fuzz/fuzz-type.yaml", TestCase: &fuzzTypeOverride{}},
+	{Path: "fuzz/fuzz-query.yaml", TestCase: &httpFuzzQuery{}},
+	{Path: "fuzz/fuzz-headless.yaml", TestCase: &HeadlessFuzzingQuery{}},
 }
 
 type httpFuzzQuery struct{}
@@ -50,7 +51,7 @@ func (h *fuzzModeOverride) Execute(filePath string) error {
 	})
 	ts := httptest.NewTLSServer(router)
 	defer ts.Close()
-	results, err := testutils.RunNucleiTemplateAndGetResults(filePath, ts.URL+"/?id=example&name=nuclei", false, "-fuzzing-mode", "single", "-json")
+	results, err := testutils.RunNucleiTemplateAndGetResults(filePath, ts.URL+"/?id=example&name=nuclei", debug, "-fuzzing-mode", "single", "-jsonl")
 	if err != nil {
 		return err
 	}
@@ -95,7 +96,7 @@ func (h *fuzzTypeOverride) Execute(filePath string) error {
 	})
 	ts := httptest.NewTLSServer(router)
 	defer ts.Close()
-	results, err := testutils.RunNucleiTemplateAndGetResults(filePath, ts.URL+"?id=example", false, "-fuzzing-type", "replace", "-json")
+	results, err := testutils.RunNucleiTemplateAndGetResults(filePath, ts.URL+"?id=example", debug, "-fuzzing-type", "replace", "-jsonl")
 	if err != nil {
 		return err
 	}
@@ -125,4 +126,24 @@ func (h *fuzzTypeOverride) Execute(filePath string) error {
 		return fmt.Errorf("expected id to be fuzz-word, got %s", values.Get("id"))
 	}
 	return nil
+}
+
+// HeadlessFuzzingQuery tests fuzzing is working not in headless mode
+type HeadlessFuzzingQuery struct{}
+
+// Execute executes a test case and returns an error if occurred
+func (h *HeadlessFuzzingQuery) Execute(filePath string) error {
+	router := httprouter.New()
+	router.GET("/", func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+		resp := fmt.Sprintf("<html><body>%s</body></html>", r.URL.Query().Get("url"))
+		fmt.Fprint(w, resp)
+	})
+	ts := httptest.NewTLSServer(router)
+	defer ts.Close()
+
+	got, err := testutils.RunNucleiTemplateAndGetResults(filePath, ts.URL+"?url=https://scanme.sh", debug, "-headless")
+	if err != nil {
+		return err
+	}
+	return expectResultsCount(got, 2)
 }

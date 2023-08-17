@@ -94,6 +94,13 @@ func (iwe *InternalWrappedEvent) HasOperatorResult() bool {
 	return iwe.OperatorsResult != nil
 }
 
+func (iwe *InternalWrappedEvent) HasResults() bool {
+	iwe.RLock()
+	defer iwe.RUnlock()
+
+	return len(iwe.Results) > 0
+}
+
 func (iwe *InternalWrappedEvent) SetOperatorResult(operatorResult *operators.Result) {
 	iwe.Lock()
 	defer iwe.Unlock()
@@ -146,7 +153,7 @@ type ResultEvent struct {
 	// MatcherStatus is the status of the match
 	MatcherStatus bool `json:"matcher-status"`
 	// Lines is the line count for the specified match
-	Lines []int `json:"matched-line"`
+	Lines []int `json:"matched-line,omitempty"`
 
 	FileToIndexPosition map[string]int `json:"-"`
 }

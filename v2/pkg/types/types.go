@@ -1,12 +1,19 @@
 package types
 
 import (
+	"io"
+	"strings"
 	"time"
 
 	"github.com/projectdiscovery/goflags"
 	"github.com/projectdiscovery/nuclei/v2/pkg/model/types/severity"
 	"github.com/projectdiscovery/nuclei/v2/pkg/templates/types"
 	fileutil "github.com/projectdiscovery/utils/file"
+)
+
+var (
+	// ErrNoMoreRequests is internal error to indicate that generator has no more requests to generate
+	ErrNoMoreRequests = io.EOF
 )
 
 // Options contains the configuration options for nuclei scanner.
@@ -76,7 +83,7 @@ type Options struct {
 	// List of HTTP(s)/SOCKS5 proxy to use (comma separated or file input)
 	Proxy goflags.StringSlice
 	// TemplatesDirectory is the directory to use for storing templates
-	TemplatesDirectory string
+	NewTemplatesDirectory string
 	// TraceLogFile specifies a file to write with the trace of all requests
 	TraceLogFile string
 	// ErrorLogFile specifies a file to write with the errors of all requests
@@ -87,6 +94,8 @@ type Options struct {
 	ReportingConfig string
 	// MarkdownExportDirectory is the directory to export reports in Markdown format
 	MarkdownExportDirectory string
+	// MarkdownExportSortMode is the method to sort the markdown reports (options: severity, template, host, none)
+	MarkdownExportSortMode string
 	// SarifExport is the file to export sarif output format to
 	SarifExport string
 	// CloudURL is the URL for the nuclei cloud endpoint
@@ -189,6 +198,8 @@ type Options struct {
 	Headless bool
 	// ShowBrowser specifies whether the show the browser in headless mode
 	ShowBrowser bool
+	// HeadlessOptionalArguments specifies optional arguments to pass to Chrome
+	HeadlessOptionalArguments goflags.StringSlice
 	// NoTables disables pretty printing of cloud results in tables
 	NoTables bool
 	// DisableClustering disables clustering of templates
@@ -215,8 +226,6 @@ type Options struct {
 	AutomaticScan bool
 	// Silent suppresses any extra text and only writes found URLs on screen.
 	Silent bool
-	// Version specifies if we should just show version and exit
-	Version bool
 	// Validate validates the templates passed to nuclei.
 	Validate bool
 	// NoStrictSyntax disables strict syntax check on nuclei templates (allows custom key-value pairs).
@@ -228,20 +237,23 @@ type Options struct {
 	ShowVarDump bool
 	// No-Color disables the colored output.
 	NoColor bool
-	// UpdateTemplates updates the templates installed at startup
+	// UpdateTemplates updates the templates installed at startup (also used by cloud to update datasources)
 	UpdateTemplates bool
 	// JSON writes json line output to files
 	JSONL bool
 	// JSONRequests writes requests/responses for matches in JSON output
+	// Deprecated: use OmitRawRequests instead as of now JSONRequests(include raw requests) is always true
 	JSONRequests bool
+	// OmitRawRequests omits requests/responses for matches in JSON output
+	OmitRawRequests bool
 	// JSONExport is the file to export JSON output format to
 	JSONExport string
+	// JSONLExport is the file to export JSONL output format to
+	JSONLExport string
 	// Cloud enables nuclei cloud scan execution
 	Cloud bool
 	// EnableProgressBar enables progress bar
 	EnableProgressBar bool
-	// TemplatesVersion shows the templates installed version
-	TemplatesVersion bool
 	// TemplateDisplay displays the template contents
 	TemplateDisplay bool
 	// TemplateList lists available templates
@@ -266,10 +278,6 @@ type Options struct {
 	NewTemplatesWithVersion goflags.StringSlice
 	// NoInteractsh disables use of interactsh server for interaction polling
 	NoInteractsh bool
-	// UpdateNuclei checks for an update for the nuclei engine
-	UpdateNuclei bool
-	// NoUpdateTemplates disables checking for nuclei templates updates
-	NoUpdateTemplates bool
 	// EnvironmentVariables enables support for environment variables
 	EnvironmentVariables bool
 	// MatcherStatus displays optional status for the failed matches as well
@@ -280,10 +288,12 @@ type Options struct {
 	ClientKeyFile string
 	// ClientCAFile client certificate authority file (PEM-encoded) used for authenticating against scanned hosts
 	ClientCAFile string
-	// Use ZTLS library
+	// Deprecated: Use ZTLS library
 	ZTLS bool
-	// Sandbox enables sandboxed nuclei template execution
-	Sandbox bool
+	// AllowLocalFileAccess allows local file access from templates payloads
+	AllowLocalFileAccess bool
+	// RestrictLocalNetworkAccess restricts local network access from templates requests
+	RestrictLocalNetworkAccess bool
 	// ShowMatchLine enables display of match line number
 	ShowMatchLine bool
 	// EnablePprof enables exposing pprof runtime information with a webserver.
@@ -327,31 +337,57 @@ type Options struct {
 	// Uncover search limit
 	UncoverLimit int
 	// Uncover search delay
-	UncoverDelay int
-	// ConfigPath contains the config path (used by healthcheck)
-	ConfigPath string
+	UncoverRateLimit int
 	// ScanAllIPs associated to a dns record
 	ScanAllIPs bool
 	// IPVersion to scan (4,6)
 	IPVersion goflags.StringSlice
-	// Github token used to clone/pull from private repos for custom templates
+	// PublicTemplateDisableDownload disables downloading templates from the nuclei-templates public repository
+	PublicTemplateDisableDownload bool
+	// GitHub token used to clone/pull from private repos for custom templates
 	GithubToken string
-	// GithubTemplateRepo is the list of custom public/private templates github repos
+	// GithubTemplateRepo is the list of custom public/private templates GitHub repos
 	GithubTemplateRepo []string
-	// AWS access key for downloading templates from s3 bucket
+	// GitHubTemplateDisableDownload disables downloading templates from custom GitHub repositories
+	GitHubTemplateDisableDownload bool
+	// GitLabServerURL is the gitlab server to use for custom templates
+	GitLabServerURL string
+	// GitLabToken used to clone/pull from private repos for custom templates
+	GitLabToken string
+	// GitLabTemplateRepositoryIDs is the comma-separated list of custom gitlab repositories IDs
+	GitLabTemplateRepositoryIDs []int
+	// GitLabTemplateDisableDownload disables downloading templates from custom GitLab repositories
+	GitLabTemplateDisableDownload bool
+	// AWS access key for downloading templates from S3 bucket
 	AwsAccessKey string
-	// AWS secret key for downloading templates from s3 bucket
+	// AWS secret key for downloading templates from S3 bucket
 	AwsSecretKey string
-	// AWS bucket name for downloading templates from s3 bucket
+	// AWS bucket name for downloading templates from S3 bucket
 	AwsBucketName string
-	// AWS Region name where aws s3 bucket is located
+	// AWS Region name where AWS S3 bucket is located
 	AwsRegion string
+	// AwsTemplateDisableDownload disables downloading templates from AWS S3 buckets
+	AwsTemplateDisableDownload bool
+	// AzureContainerName for downloading templates from Azure Blob Storage. Example: templates
+	AzureContainerName string
+	// AzureTenantID for downloading templates from Azure Blob Storage. Example: 00000000-0000-0000-0000-000000000000
+	AzureTenantID string
+	// AzureClientID for downloading templates from Azure Blob Storage. Example: 00000000-0000-0000-0000-000000000000
+	AzureClientID string
+	// AzureClientSecret for downloading templates from Azure Blob Storage. Example: 00000000-0000-0000-0000-000000000000
+	AzureClientSecret string
+	// AzureServiceURL for downloading templates from Azure Blob Storage. Example: https://XXXXXXXXXX.blob.core.windows.net/
+	AzureServiceURL string
+	// AzureTemplateDisableDownload disables downloading templates from Azure Blob Storage
+	AzureTemplateDisableDownload bool
 	// Scan Strategy (auto,hosts-spray,templates-spray)
 	ScanStrategy string
 	// Fuzzing Type overrides template level fuzzing-type configuration
 	FuzzingType string
 	// Fuzzing Mode overrides template level fuzzing-mode configuration
 	FuzzingMode string
+	// TlsImpersonate enables TLS impersonation
+	TlsImpersonate bool
 }
 
 // ShouldLoadResume resume file
@@ -367,6 +403,11 @@ func (options *Options) ShouldSaveResume() bool {
 // ShouldFollowHTTPRedirects determines if http redirects should be followed
 func (options *Options) ShouldFollowHTTPRedirects() bool {
 	return options.FollowRedirects || options.FollowHostRedirects
+}
+
+// HasClientCertificates determines if any client certificate was specified
+func (options *Options) HasClientCertificates() bool {
+	return options.ClientCertFile != "" || options.ClientCAFile != "" || options.ClientKeyFile != ""
 }
 
 // DefaultOptions returns default options for nuclei
@@ -402,4 +443,18 @@ func (options *Options) HasCloudOptions() bool {
 
 func (options *Options) ShouldUseHostError() bool {
 	return options.MaxHostError > 0 && !options.NoHostErrors
+}
+
+func (options *Options) ParseHeadlessOptionalArguments() map[string]string {
+	optionalArguments := make(map[string]string)
+	for _, v := range options.HeadlessOptionalArguments {
+		if argParts := strings.SplitN(v, "=", 2); len(argParts) >= 2 {
+			key := strings.TrimSpace(argParts[0])
+			value := strings.TrimSpace(argParts[1])
+			if key != "" && value != "" {
+				optionalArguments[key] = value
+			}
+		}
+	}
+	return optionalArguments
 }

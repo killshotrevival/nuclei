@@ -16,12 +16,15 @@ import (
 	"github.com/projectdiscovery/nuclei/v2/pkg/output"
 	"github.com/projectdiscovery/nuclei/v2/pkg/protocols"
 	"github.com/projectdiscovery/nuclei/v2/pkg/protocols/common/contextargs"
+	"github.com/projectdiscovery/nuclei/v2/pkg/protocols/common/generators"
 	"github.com/projectdiscovery/nuclei/v2/pkg/protocols/common/helpers/eventcreator"
 	"github.com/projectdiscovery/nuclei/v2/pkg/protocols/common/helpers/responsehighlighter"
 	"github.com/projectdiscovery/nuclei/v2/pkg/protocols/common/replacer"
 	"github.com/projectdiscovery/nuclei/v2/pkg/protocols/common/utils/vardump"
+	protocolutils "github.com/projectdiscovery/nuclei/v2/pkg/protocols/utils"
 	"github.com/projectdiscovery/nuclei/v2/pkg/protocols/whois/rdapclientpool"
 	templateTypes "github.com/projectdiscovery/nuclei/v2/pkg/templates/types"
+
 	"github.com/projectdiscovery/nuclei/v2/pkg/types"
 )
 
@@ -43,12 +46,12 @@ type Request struct {
 	Server string `yaml:"server,omitempty" json:"server,omitempty" jsonschema:"title=server url to execute the WHOIS request on,description=Server contains the server url to execute the WHOIS request on"`
 	// cache any variables that may be needed for operation.
 	client          *rdap.Client
-	options         *protocols.ExecuterOptions
+	options         *protocols.ExecutorOptions
 	parsedServerURL *url.URL
 }
 
 // Compile compiles the request generators preparing any requests possible.
-func (request *Request) Compile(options *protocols.ExecuterOptions) error {
+func (request *Request) Compile(options *protocols.ExecutorOptions) error {
 	var err error
 	if request.Server != "" {
 		request.parsedServerURL, err = url.Parse(request.Server)
@@ -85,7 +88,11 @@ func (request *Request) GetID() string {
 // ExecuteWithResults executes the protocol requests and returns results instead of writing them.
 func (request *Request) ExecuteWithResults(input *contextargs.Context, dynamicValues, previous output.InternalEvent, callback protocols.OutputEventCallback) error {
 	// generate variables
-	variables := generateVariables(input.MetaInput.Input)
+	defaultVars := protocolutils.GenerateVariables(input.MetaInput.Input, false, nil)
+	optionVars := generators.BuildPayloadFromOptions(request.options.Options)
+	vars := request.options.Variables.Evaluate(generators.MergeMaps(defaultVars, optionVars, dynamicValues))
+
+	variables := generators.MergeMaps(vars, defaultVars, optionVars, dynamicValues, request.options.Constants)
 
 	if vardump.EnableVarDump {
 		gologger.Debug().Msgf("Protocol request variables: \n%s\n", vardump.DumpVariables(variables))
@@ -177,27 +184,4 @@ func (request *Request) MakeResultEventItem(wrapped *output.InternalWrappedEvent
 // Type returns the type of the protocol request
 func (request *Request) Type() templateTypes.ProtocolType {
 	return templateTypes.WHOISProtocol
-}
-
-// generateVariables will create default variables after parsing a url
-func generateVariables(input string) map[string]interface{} {
-	var domain string
-
-	parsed, err := url.Parse(input)
-	if err != nil {
-		return map[string]interface{}{"Input": input}
-	}
-	domain = parsed.Host
-	if domain == "" {
-		domain = input
-	}
-	if strings.Contains(domain, ":") {
-		domain = strings.Split(domain, ":")[0]
-	}
-
-	return map[string]interface{}{
-		"Input":    input,
-		"Hostname": parsed.Host,
-		"Host":     domain,
-	}
 }

@@ -34,9 +34,9 @@ import (
 	"github.com/projectdiscovery/ratelimit"
 )
 
-var codeTestcases = map[string]testutils.TestCase{
-	"code/test.yaml": &goIntegrationTest{},
-	"code/test.json": &goIntegrationTest{},
+var codeTestcases = []TestCaseInfo{
+	{Path: "code/test.yaml", TestCase: &goIntegrationTest{}},
+	{Path: "code/test.json", TestCase: &goIntegrationTest{}},
 }
 
 type goIntegrationTest struct{}
@@ -88,7 +88,7 @@ func executeNucleiAsCode(templatePath, templateURL string) ([]string, error) {
 	defaultOpts.Templates = goflags.StringSlice{templatePath}
 	defaultOpts.ExcludeTags = config.ReadIgnoreFile().Tags
 
-	interactOpts := interactsh.NewDefaultOptions(outputWriter, reportingClient, mockProgress)
+	interactOpts := interactsh.DefaultOptions(outputWriter, reportingClient, mockProgress)
 	interactClient, err := interactsh.New(interactOpts)
 	if err != nil {
 		return nil, errors.Wrap(err, "could not create interact client")
@@ -99,7 +99,7 @@ func executeNucleiAsCode(templatePath, templateURL string) ([]string, error) {
 	catalog := disk.NewCatalog(path.Join(home, "nuclei-templates"))
 	ratelimiter := ratelimit.New(context.Background(), 150, time.Second)
 	defer ratelimiter.Stop()
-	executerOpts := protocols.ExecuterOptions{
+	executerOpts := protocols.ExecutorOptions{
 		Output:          outputWriter,
 		Options:         defaultOpts,
 		Progress:        mockProgress,
@@ -120,11 +120,7 @@ func executeNucleiAsCode(templatePath, templateURL string) ([]string, error) {
 	}
 	executerOpts.WorkflowLoader = workflowLoader
 
-	configObject, err := config.ReadConfiguration()
-	if err != nil {
-		return nil, errors.Wrap(err, "could not read configuration file")
-	}
-	store, err := loader.New(loader.NewConfig(defaultOpts, configObject, catalog, executerOpts))
+	store, err := loader.New(loader.NewConfig(defaultOpts, catalog, executerOpts))
 	if err != nil {
 		return nil, errors.Wrap(err, "could not create loader")
 	}
