@@ -30,6 +30,7 @@ import (
 	"github.com/projectdiscovery/nuclei/v2/pkg/protocols/common/helpers/responsehighlighter"
 	"github.com/projectdiscovery/nuclei/v2/pkg/protocols/common/utils/vardump"
 	"github.com/projectdiscovery/nuclei/v2/pkg/protocols/network/networkclientpool"
+	protocolutils "github.com/projectdiscovery/nuclei/v2/pkg/protocols/utils"
 	templateTypes "github.com/projectdiscovery/nuclei/v2/pkg/templates/types"
 	"github.com/projectdiscovery/nuclei/v2/pkg/types"
 	urlutil "github.com/projectdiscovery/utils/url"
@@ -69,7 +70,7 @@ type Request struct {
 
 	// cache any variables that may be needed for operation.
 	dialer  *fastdialer.Dialer
-	options *protocols.ExecuterOptions
+	options *protocols.ExecutorOptions
 }
 
 // Input is an input for the websocket protocol
@@ -95,7 +96,7 @@ const (
 )
 
 // Compile compiles the request generators preparing any requests possible.
-func (request *Request) Compile(options *protocols.ExecuterOptions) error {
+func (request *Request) Compile(options *protocols.ExecutorOptions) error {
 	request.options = options
 
 	client, err := networkclientpool.Get(options.Options, &networkclientpool.Configuration{})
@@ -105,7 +106,7 @@ func (request *Request) Compile(options *protocols.ExecuterOptions) error {
 	request.dialer = client
 
 	if len(request.Payloads) > 0 {
-		request.generator, err = generators.New(request.Payloads, request.AttackType.Value, request.options.TemplatePath, request.options.Options.TemplatesDirectory, request.options.Options.Sandbox, options.Catalog, options.Options.AttackType)
+		request.generator, err = generators.New(request.Payloads, request.AttackType.Value, request.options.TemplatePath, request.options.Options.AllowLocalFileAccess, options.Catalog, options.Options.AttackType)
 		if err != nil {
 			return errors.Wrap(err, "could not parse payloads")
 		}
@@ -168,22 +169,14 @@ func (request *Request) ExecuteWithResults(input *contextargs.Context, dynamicVa
 func (request *Request) executeRequestWithPayloads(input, hostname string, dynamicValues, previous output.InternalEvent, callback protocols.OutputEventCallback) error {
 	header := http.Header{}
 
-	payloadValues := make(map[string]interface{})
-	for k, v := range dynamicValues {
-		payloadValues[k] = v
-	}
-	parsed, err := url.Parse(input)
+	parsed, err := urlutil.Parse(input)
 	if err != nil {
 		return errors.Wrap(err, parseUrlErrorMessage)
 	}
-	payloadValues["Hostname"] = parsed.Host
-	payloadValues["Host"] = parsed.Hostname()
-	payloadValues["Scheme"] = parsed.Scheme
-	requestPath := parsed.Path
-	if values := urlutil.GetParams(parsed.Query()); len(values) > 0 {
-		requestPath = requestPath + "?" + values.Encode()
-	}
-	payloadValues["Path"] = requestPath
+	defaultVars := protocolutils.GenerateVariables(parsed, false, nil)
+	optionVars := generators.BuildPayloadFromOptions(request.options.Options)
+	variables := request.options.Variables.Evaluate(generators.MergeMaps(defaultVars, optionVars, dynamicValues))
+	payloadValues := generators.MergeMaps(variables, defaultVars, optionVars, dynamicValues, request.options.Constants)
 
 	requestOptions := request.options
 	for key, value := range request.Headers {

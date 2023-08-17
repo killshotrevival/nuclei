@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"path/filepath"
 
 	"github.com/Knetic/govaluate"
 	"github.com/projectdiscovery/gologger"
@@ -170,9 +171,18 @@ func isIdMatch(tagFilter *TagFilter, templateId string) bool {
 	if len(tagFilter.excludeIds) == 0 && len(tagFilter.allowedIds) == 0 {
 		return true
 	}
-	included := true
-	if len(tagFilter.allowedIds) > 0 {
-		_, included = tagFilter.allowedIds[templateId]
+
+	included := len(tagFilter.allowedIds) == 0
+	for id := range tagFilter.allowedIds {
+		match, err := filepath.Match(id, templateId)
+		if err != nil {
+			continue
+		}
+
+		if match {
+			included = true
+			break
+		}
 	}
 
 	excluded := false
@@ -195,9 +205,19 @@ func tryCollectConditionsMatchinfo(template *templates.Template) map[string]inte
 		"severity":    template.Info.SeverityHolder.Severity.String(),
 		"protocol":    template.Type().String(),
 	}
-
 	for k, v := range template.Info.Metadata {
-		parameters[k] = v
+		// replace `-` in keys with `_` when ranging
+		parameters[strings.ReplaceAll(k, "-", "_")] = v
+	}
+
+	if template.Info.Classification != nil {
+		parameters["cvss_metrics"] = template.Info.Classification.CVSSMetrics
+		parameters["cvss_score"] = template.Info.Classification.CVSSScore
+		parameters["cve_id"] = template.Info.Classification.CVEID.ToSlice()
+		parameters["cwe_id"] = template.Info.Classification.CWEID.ToSlice()
+		parameters["cpe"] = template.Info.Classification.CPE
+		parameters["epss_score"] = template.Info.Classification.EPSSScore
+		parameters["epss_percentile"] = template.Info.Classification.EPSSPercentile
 	}
 
 	if template.Type() == types.HTTPProtocol {
